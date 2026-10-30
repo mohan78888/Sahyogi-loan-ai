@@ -4,6 +4,14 @@ Core configuration and environment settings for Sahyogi Loan AI.
 import os
 from pydantic import BaseModel
 
+try:
+    from dotenv import load_dotenv
+    _base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    load_dotenv(os.path.join(_base_dir, ".env"))
+    load_dotenv(os.path.join(_base_dir, "..", ".env"))
+except ImportError:
+    pass
+
 class Settings(BaseModel):
     APP_NAME: str = "Sahyogi Loan AI"
     APP_VERSION: str = "1.0.0"

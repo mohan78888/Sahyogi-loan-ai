@@ -28,6 +28,8 @@ loansaathi/backend/storage/documents/*
 
 # Environment & secrets
 .env
+*/.env
+*/*/.env
 .env.local
 .env.*.local
 
