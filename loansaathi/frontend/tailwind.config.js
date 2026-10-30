@@ -3,15 +3,22 @@ export default {
   theme: {
     extend: {
       colors: {
-        ink: "#1f2a24",
-        leaf: { 50: "#f1f8f4", 100: "#dcefe3", 200: "#b8dfca", 300: "#8bcaaa", 500: "#2f855a", 600: "#276749", 700: "#1f5238" },
-        saffron: { 100: "#fdf0d5", 200: "#fbe0a8", 500: "#d98a1c", 700: "#8a5610" },
+        forest: {
+          800: "#133D32",
+          900: "#0D332A",
+          950: "#08241D",
+        },
+        cream: {
+          50: "#FAF9F5",
+          100: "#F4F3ED",
+          200: "#EAE8DF",
+          300: "#DEDBCF",
+        },
+        ink: "#1E293B",
       },
       fontFamily: {
+        serif: ["'Newsreader'", "Georgia", "serif"],
         sans: ["'Noto Sans'", "'Noto Sans Devanagari'", "system-ui", "sans-serif"],
-      },
-      animation: {
-        float: "float 8s ease-in-out infinite",
       },
     },
   },
