@@ -6,9 +6,10 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  TextInput,
   Animated,
   Platform,
-  Dimensions,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -23,7 +24,13 @@ interface VoiceAssistantModalProps {
   onOpenManualEntry: () => void;
 }
 
-const { width } = Dimensions.get('window');
+interface ChatMsg {
+  id: string;
+  sender: 'user' | 'ai';
+  text: string;
+  time: string;
+  action?: 'doc_prompt' | 'demo_loaded' | 'schemes_info';
+}
 
 export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
   visible,
@@ -39,13 +46,15 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     loadDemo,
   } = useFinance();
 
-  // Conversation stages: 'prompt' | 'step1_docs' | 'step2_analysis' | 'step3_schemes'
-  const [stage, setStage] = useState<'prompt' | 'step1_docs' | 'step2_analysis' | 'step3_schemes'>('prompt');
+  const [inputText, setInputText] = useState('');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [userQuery, setUserQuery] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
+  const [messages, setMessages] = useState<ChatMsg[]>([]);
 
-  // Animated visualizer bars
+  const scrollViewRef = useRef<any>(null);
+
+  // Animated visualizer bars for Gemini-like live equalizer
   const barHeights = useRef([
     new Animated.Value(8),
     new Animated.Value(14),
@@ -56,7 +65,26 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     new Animated.Value(8),
   ]).current;
 
-  // Stop TTS when closing
+  const income = inputs.income || (source === 'demo' ? 60000 : 0);
+  const existingEmi = inputs.existingEmi || (source === 'demo' ? 16500 : 0);
+  const monthlySurplus = calculations.monthlySurplus ?? (source === 'demo' ? 18500 : 0);
+  const emiPct = calculations.emiToIncomePct ?? (source === 'demo' ? 27.5 : 0);
+
+  // Initialize with initial greeting when opened
+  useEffect(() => {
+    if (visible && messages.length === 0) {
+      const initialGreeting: ChatMsg = {
+        id: 'greet-1',
+        sender: 'ai',
+        text: 'Namaste! Main aapka Sahyogi Gemini AI Assistant hoon. Aap bol kar ya likh kar apna loan sawal pooch sakte hain. Jaise: "Loan reject ho jata hai kya karu?" ya "Mera EMI safe hai?"',
+        time: 'Just now',
+      };
+      setMessages([initialGreeting]);
+      speakText(initialGreeting.text);
+    }
+  }, [visible]);
+
+  // Clean up speech on close
   const stopVoice = () => {
     try {
       Speech.stop();
@@ -73,13 +101,21 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     setIsSpeaking(false);
   };
 
+  useEffect(() => {
+    if (!visible) {
+      stopVoice();
+      setInputText('');
+    }
+  }, [visible]);
+
+  // TTS Speech implementation
   const speakText = (text: string) => {
     if (isMuted) return;
     setIsSpeaking(true);
 
     const plainText = text.replace(/[*#_~]/g, '');
 
-    // 1. Native Expo-Speech (Works on Android / iOS directly, 100% free, NO API KEY needed)
+    // 1. Native Expo-Speech (Android & iOS direct, 100% free)
     try {
       Speech.stop();
       Speech.speak(plainText, {
@@ -90,7 +126,6 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
         onDone: () => setIsSpeaking(false),
         onStopped: () => setIsSpeaking(false),
         onError: () => {
-          // Fallback to English (India) if Hindi voice pack is not installed on user's device
           try {
             Speech.speak(plainText, {
               language: 'en-IN',
@@ -107,8 +142,8 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
         },
       });
       return;
-    } catch (err) {
-      // Native speech not available, fallback to Web Speech
+    } catch {
+      // fallback
     }
 
     // 2. Web fallback
@@ -182,48 +217,114 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     };
   }, [isSpeaking]);
 
-  // When modal closes, clean up voice
-  useEffect(() => {
-    if (!visible) {
-      stopVoice();
-      setStage('prompt');
-      setUserQuery('');
+  // Generate Intelligent Response based on Gemini / Underwriter Rules
+  const handleSendMessage = async (queryText?: string) => {
+    const q = (queryText || inputText).trim();
+    if (!q) return;
+
+    // Add user message
+    const userMsg: ChatMsg = {
+      id: `u-${Date.now()}`,
+      sender: 'user',
+      text: q,
+      time: 'Just now',
+    };
+
+    setMessages((prev) => [...prev, userMsg]);
+    setInputText('');
+    setIsThinking(true);
+    stopVoice();
+
+    // Scroll to bottom
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+
+    const qLower = q.toLowerCase();
+    let replyText = '';
+    let actionType: 'doc_prompt' | 'demo_loaded' | 'schemes_info' | undefined;
+
+    // Try calling backend /api/ai/chat
+    try {
+      const backendUrl = Platform.OS === 'android' ? 'http://10.0.2.2:8000' : 'http://localhost:8000';
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+
+      const resp = await fetch(`${backendUrl}/api/ai/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          query: q,
+          context: {
+            income,
+            existingEmi,
+            foir_pct: emiPct,
+            monthly_surplus: monthlySurplus,
+          },
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.reply) {
+          replyText = data.reply;
+        }
+      }
+    } catch {
+      // Offline / Local Intelligence fallback
     }
-  }, [visible]);
 
-  // Handle User Voice Query Trigger
-  const handleTriggerVoice = (queryText?: string) => {
-    const q = queryText || 'Yrr mujhe loan lena hai but applicant reject ho jata hai, kya karu?';
-    setUserQuery(q);
-    setStage('step1_docs');
+    // If backend did not provide reply, use smart conversational underwriter logic
+    if (!replyText) {
+      if (qLower.includes('reject') || qLower.includes('rejection') || qLower.includes('nahi mil raha')) {
+        replyText =
+          'Bank rejection aksar high EMI burden (FOIR > 50%), low CIBIL, ya missing documents ki wajah se hota hai. Aap apna Salary slip ya Bank statement upload karein ya numbers enter karein, taaki hum bank data connect karke exact approval formula nikal sakein.';
+        actionType = 'doc_prompt';
+      } else if (qLower.includes('mudra') || qLower.includes('scheme') || qLower.includes('yojana') || qLower.includes('subsidy')) {
+        replyText =
+          'Aapke liye PM Mudra Yojana sabse best hai, jisme bina collateral ke ₹10 Lakhs tak loan milta hai. Jan Samarth portal se aap 13 government schemes me digital approval le sakte hain.';
+        actionType = 'schemes_info';
+      } else if (qLower.includes('cibil') || qLower.includes('credit score') || qLower.includes('score')) {
+        replyText =
+          'Safe loan approval ke liye 750+ CIBIL score best hota hai. Kisi bhi EMI ki date miss na karein aur credit card limit ka sirf 30% use karein taaki score jaldi improve ho.';
+      } else if (qLower.includes('emi') || qLower.includes('surplus') || qLower.includes('foir') || qLower.includes('burden')) {
+        if (income > 0) {
+          replyText = `Aapka monthly income ₹${income.toLocaleString('en-IN')} hai aur EMI ₹${existingEmi.toLocaleString('en-IN')} hai (${emiPct}% DTI). Aapka disposable surplus ₹${monthlySurplus.toLocaleString('en-IN')} bachta hai, jo bank ke safe limit me hai.`;
+        } else {
+          replyText =
+            'Indian banks ka rule hota hai ki total EMI aapki income ke 40-50% se kam honi chahiye. Aap apna data enter karein taaki exact ratio nikal sakein.';
+          actionType = 'doc_prompt';
+        }
+      } else if (qLower.includes('kitna loan') || qLower.includes('eligibility') || qLower.includes('limit')) {
+        const estLoan = income > 0 ? income * 12 * 3.5 : 500000;
+        replyText = `Aapki income ke mutabiq aap lagbhag ₹${Math.round(estLoan).toLocaleString('en-IN')} tak loan ke eligible ho sakte hain agar FOIR 45% ke andar rahe.`;
+      } else {
+        replyText =
+          'Main aapke borrower profile ko evaluate karke bank underwriting guidelines aur government schemes (PM Mudra, Jan Samarth) ke hisaab se best advice de sakta hoon.';
+      }
+    }
 
-    const step1Speech =
-      'Namaste! Fikar mat kijiye. Bank loan rejection aksar high debt burden, low credit score, ya insufficient document verification ki wajah se hota hai. Aap apna Salary Slip ya Bank Statement provide karein ya quick numbers enter karein, taaki hum bank data connect karke exact approval formula nikal sakein.';
-    speakText(step1Speech);
+    const aiMsg: ChatMsg = {
+      id: `ai-${Date.now()}`,
+      sender: 'ai',
+      text: replyText,
+      time: 'Just now',
+      action: actionType,
+    };
+
+    setMessages((prev) => [...prev, aiMsg]);
+    setIsThinking(false);
+
+    // AI speaks the reply aloud!
+    speakText(replyText);
+
+    setTimeout(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    }, 100);
   };
-
-  // Handle Loading Demo
-  const handleLoadDemoProfile = () => {
-    loadDemo();
-    setStage('step2_analysis');
-    const step2Speech =
-      'Aapka profile connect ho gaya hai! Monthly income 60,000 rupaye me se 16,500 EMI me ja raha hai, jo 27.5% EMI burden hai. Aapka monthly surplus 18,500 bachta hai. Bank ke standard guidelines ke anusaar, chaliye dekhte hain kaunse schemes aur tenure se loan approve hoga.';
-    speakText(step2Speech);
-  };
-
-  // Proceed to Step 3 (Schemes)
-  const handleShowSchemes = () => {
-    setStage('step3_schemes');
-    const step3Speech =
-      'Aapke profile ke hisaab se do powerful government schemes aur approval hacks hain: Pehla, PM Mudra Yojana jisme bina collateral ke loan milta hai. Aur doosra, loan tenure badhane se EMI 30% drop ho jayegi aur bank turant approve karega.';
-    speakText(step3Speech);
-  };
-
-  // Dynamic calculations from context
-  const income = inputs.income || (source === 'demo' ? 60000 : 0);
-  const existingEmi = inputs.existingEmi || (source === 'demo' ? 16500 : 0);
-  const monthlySurplus = calculations.monthlySurplus ?? (source === 'demo' ? 18500 : 0);
-  const emiPct = calculations.emiToIncomePct ?? (source === 'demo' ? 27.5 : 0);
 
   return (
     <Modal
@@ -233,7 +334,10 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
       onRequestClose={onClose}
     >
       <View style={styles.modalOverlay}>
-        <View style={styles.sheetContainer}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.sheetContainer}
+        >
           {/* Header Bar */}
           <View style={styles.header}>
             <View style={styles.headerTitleRow}>
@@ -241,23 +345,23 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
                 <Feather name="mic" size={17} color="#FFFFFF" />
               </View>
               <View>
-                <Text style={styles.titleText}>Sahyogi Voice AI</Text>
+                <Text style={styles.titleText}>Sahyogi Gemini AI Voice</Text>
                 <View style={styles.statusRow}>
                   <View
                     style={[
                       styles.statusDot,
-                      { backgroundColor: isSpeaking ? '#10B981' : '#38BDF8' },
+                      { backgroundColor: isSpeaking ? '#10B981' : isThinking ? '#F59E0B' : '#38BDF8' },
                     ]}
                   />
                   <Text style={styles.statusText}>
-                    {isSpeaking ? 'AI Speaking...' : 'NLP Voice Assistant'}
+                    {isSpeaking ? 'AI Speaking aloud...' : isThinking ? 'Gemini AI Thinking...' : 'Ready to Speak or Chat'}
                   </Text>
                 </View>
               </View>
             </View>
 
             <View style={styles.headerActionRow}>
-              {/* Voice Mute / Speaker Toggle */}
+              {/* Speaker Mute/Unmute */}
               <TouchableOpacity
                 style={styles.iconBtn}
                 onPress={() => {
@@ -265,7 +369,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
                   setIsMuted(!isMuted);
                 }}
                 activeOpacity={0.7}
-                accessibilityLabel="Toggle Voice Audio"
+                accessibilityLabel="Toggle Voice Speaker"
               >
                 <Feather
                   name={isMuted ? 'volume-x' : 'volume-2'}
@@ -286,7 +390,7 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
             </View>
           </View>
 
-          {/* Sound Wave Equalizer Display */}
+          {/* Gemini Live Sound Wave Equalizer Display */}
           <View style={styles.visualizerContainer}>
             <View style={styles.soundWaveRow}>
               {barHeights.map((barH, idx) => (
@@ -296,7 +400,13 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
                     styles.soundBar,
                     {
                       height: barH,
-                      backgroundColor: isSpeaking ? '#0F5C4D' : '#94A3B8',
+                      backgroundColor: isSpeaking
+                        ? idx % 2 === 0
+                          ? '#0F5C4D'
+                          : '#10B981'
+                        : isThinking
+                        ? '#F59E0B'
+                        : '#94A3B8',
                     },
                   ]}
                 />
@@ -304,398 +414,174 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
             </View>
             <Text style={styles.soundWaveCaption}>
               {isSpeaking
-                ? 'Speaking response in Hindi / English...'
-                : stage === 'prompt'
-                ? 'Tap mic or quick prompt below to speak'
-                : 'Tap cards below to proceed'}
+                ? '🔊 Speaking response in voice...'
+                : isThinking
+                ? '⚡ Processing through Gemini & Underwriter engine...'
+                : '🎙️ Speak with keyboard mic or choose prompt below'}
             </Text>
           </View>
 
+          {/* Chat Messages Stream */}
           <ScrollView
+            ref={scrollViewRef}
             style={styles.scrollContent}
             contentContainerStyle={styles.scrollInner}
             showsVerticalScrollIndicator={false}
           >
-            {/* STAGE 0: PROMPT SELECTION & BIG MIC */}
-            {stage === 'prompt' && (
-              <View style={styles.promptStageBox}>
-                <TouchableOpacity
-                  style={styles.bigMicHero}
-                  onPress={() => handleTriggerVoice()}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.bigMicGlow}>
-                    <Feather name="mic" size={38} color="#FFFFFF" />
-                  </View>
-                  <Text style={styles.bigMicLabel}>Tap to Speak</Text>
-                  <Text style={styles.bigMicSub}>or select a question below</Text>
-                </TouchableOpacity>
-
-                <View style={styles.promptListContainer}>
-                  <Text style={styles.promptListHeading}>Suggested Voice Prompts:</Text>
-
-                  <TouchableOpacity
-                    style={styles.promptChip}
-                    onPress={() =>
-                      handleTriggerVoice(
-                        'Yrr mujhe loan lena hai but applicant reject ho jata hai, kya karu?'
-                      )
-                    }
-                    activeOpacity={0.75}
-                  >
-                    <View style={styles.promptChipIcon}>
-                      <Feather name="help-circle" size={16} color="#0F5C4D" />
-                    </View>
-                    <View style={styles.promptChipTextWrap}>
-                      <Text style={styles.promptChipText}>
-                        "Yrr mujhe loan lena hai but reject ho jata hai, kya karu?"
-                      </Text>
-                      <Text style={styles.promptChipMeta}>Rejection diagnosis & scheme advice</Text>
-                    </View>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.promptChip}
-                    onPress={() =>
-                      handleTriggerVoice('Mera EMI burden kitna percent safe hai?')
-                    }
-                    activeOpacity={0.75}
-                  >
-                    <View style={styles.promptChipIcon}>
-                      <Feather name="percent" size={16} color="#1D4ED8" />
-                    </View>
-                    <View style={styles.promptChipTextWrap}>
-                      <Text style={styles.promptChipText}>
-                        "Mera EMI burden kitna percent safe hai?"
-                      </Text>
-                      <Text style={styles.promptChipMeta}>Debt-to-income threshold check</Text>
-                    </View>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.promptChip}
-                    onPress={() =>
-                      handleTriggerVoice(
-                        'Kaunsi government scheme se bina collateral loan mil sakta hai?'
-                      )
-                    }
-                    activeOpacity={0.75}
-                  >
-                    <View style={styles.promptChipIcon}>
-                      <Feather name="award" size={16} color="#B45309" />
-                    </View>
-                    <View style={styles.promptChipTextWrap}>
-                      <Text style={styles.promptChipText}>
-                        "Kaunsi government scheme se loan mil sakta hai?"
-                      </Text>
-                      <Text style={styles.promptChipMeta}>PM Mudra & Jan Samarth schemes</Text>
-                    </View>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {/* USER SPEECH BUBBLE */}
-            {stage !== 'prompt' && userQuery ? (
-              <View style={styles.userBubble}>
-                <View style={styles.userBubbleIcon}>
-                  <Feather name="user" size={13} color="#FFFFFF" />
-                </View>
-                <Text style={styles.userBubbleText}>{userQuery}</Text>
-              </View>
-            ) : null}
-
-            {/* STAGE 1: AI ASKS FOR DOCUMENTS / DATA */}
-            {stage === 'step1_docs' && (
-              <View style={styles.stepBox}>
-                <View style={styles.aiBubble}>
-                  <View style={styles.aiBubbleHeader}>
-                    <Text style={styles.aiBubbleName}>Sahyogi Voice AI</Text>
-                    <TouchableOpacity
-                      onPress={() =>
-                        speakText(
-                          'Namaste! Fikar mat kijiye. Bank loan rejection aksar high debt burden, low credit score, ya insufficient document verification ki wajah se hota hai. Aap apna Salary Slip ya Bank Statement provide karein ya quick numbers enter karein, taaki hum bank data connect karke exact approval formula nikal sakein.'
-                        )
-                      }
-                      style={styles.replaySpeakerBtn}
-                    >
-                      <Feather name="volume-2" size={14} color="#0F5C4D" />
-                      <Text style={styles.replaySpeakerText}>Listen</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <Text style={styles.aiBubbleText}>
-                    <Text style={{ fontWeight: '700' }}>Fikar mat kijiye!</Text> Bank rejection
-                    aksar <Text style={{ fontWeight: '700' }}>high EMI burden (FOIR &gt; 50%)</Text>,
-                    low credit score, ya incomplete income documentation ki wajah se hota hai.
-                  </Text>
-                  <Text style={[styles.aiBubbleText, { marginTop: 8 }]}>
-                    Aap apna <Text style={{ fontWeight: '700' }}>Salary Slip / Bank Statement</Text>{' '}
-                    provide karein ya numbers enter karein, taaki hum bank rules se connect karke
-                    exact reason aur solution nikal sakein:
-                  </Text>
-                </View>
-
-                {/* 3 Action Buttons */}
-                <View style={styles.actionCardsGroup}>
-                  {/* Option A: Upload Document */}
-                  <TouchableOpacity
-                    style={styles.actionCard}
-                    onPress={() => {
-                      onClose();
-                      router.push('/(tabs)/docs' as any);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <View style={[styles.actionCardIconBox, { backgroundColor: '#E6F4EA' }]}>
-                      <Feather name="file-text" size={20} color="#0F5C4D" />
-                    </View>
-                    <View style={styles.actionCardBody}>
-                      <Text style={styles.actionCardTitle}>1. Upload Document (PDF)</Text>
-                      <Text style={styles.actionCardDesc}>
-                        Salary slip ya bank statement se auto-extract
-                      </Text>
-                    </View>
-                    <Feather name="chevron-right" size={18} color="#94A3B8" />
-                  </TouchableOpacity>
-
-                  {/* Option B: Manual Entry */}
-                  <TouchableOpacity
-                    style={styles.actionCard}
-                    onPress={() => {
-                      onClose();
-                      onOpenManualEntry();
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <View style={[styles.actionCardIconBox, { backgroundColor: '#EFF6FF' }]}>
-                      <Feather name="edit-3" size={20} color="#1D4ED8" />
-                    </View>
-                    <View style={styles.actionCardBody}>
-                      <Text style={styles.actionCardTitle}>2. Enter Numbers Manually</Text>
-                      <Text style={styles.actionCardDesc}>Income aur EMI enter karein (10 sec)</Text>
-                    </View>
-                    <Feather name="chevron-right" size={18} color="#94A3B8" />
-                  </TouchableOpacity>
-
-                  {/* Option C: Load Demo Profile (1-Tap for Judges) */}
-                  <TouchableOpacity
-                    style={[styles.actionCard, styles.actionCardDemo]}
-                    onPress={handleLoadDemoProfile}
-                    activeOpacity={0.8}
-                  >
-                    <View style={[styles.actionCardIconBox, { backgroundColor: '#FEF3C7' }]}>
-                      <Feather name="zap" size={20} color="#B45309" />
-                    </View>
-                    <View style={styles.actionCardBody}>
+            {messages.map((item) => (
+              <View
+                key={item.id}
+                style={[
+                  styles.msgWrapper,
+                  item.sender === 'user' ? styles.userMsgWrapper : styles.aiMsgWrapper,
+                ]}
+              >
+                {item.sender === 'ai' ? (
+                  <View style={styles.aiBubble}>
+                    <View style={styles.aiBubbleHeader}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Text style={[styles.actionCardTitle, { color: '#B45309' }]}>
-                          3. Test with Demo Profile
-                        </Text>
-                        <View style={styles.instantBadge}>
-                          <Text style={styles.instantBadgeText}>Instant 1-Tap</Text>
-                        </View>
+                        <Feather name="cpu" size={13} color="#0F5C4D" />
+                        <Text style={styles.aiBubbleName}>Sahyogi Gemini AI</Text>
                       </View>
-                      <Text style={styles.actionCardDesc}>
-                        ₹60k Income, ₹16.5k EMI profile ke saath judge demo dekhein
-                      </Text>
-                    </View>
-                    <Feather name="arrow-right" size={18} color="#B45309" />
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
-
-            {/* STAGE 2: CONNECTED DATA ANALYSIS */}
-            {stage === 'step2_analysis' && (
-              <View style={styles.stepBox}>
-                <View style={styles.aiBubble}>
-                  <View style={styles.aiBubbleHeader}>
-                    <Text style={styles.aiBubbleName}>Sahyogi Voice AI — Bank Data Match</Text>
-                    <TouchableOpacity
-                      onPress={() =>
-                        speakText(
-                          `Aapka profile connect ho gaya hai! Monthly income ${income} rupaye me se ${existingEmi} EMI me ja raha hai, jo ${emiPct}% EMI burden hai. Aapka monthly surplus ${monthlySurplus} bachta hai.`
-                        )
-                      }
-                      style={styles.replaySpeakerBtn}
-                    >
-                      <Feather name="volume-2" size={14} color="#0F5C4D" />
-                      <Text style={styles.replaySpeakerText}>Listen</Text>
-                    </TouchableOpacity>
-                  </View>
-
-                  <Text style={styles.aiBubbleText}>
-                    <Text style={{ fontWeight: '700', color: '#0F5C4D' }}>
-                      Data successfully connected!
-                    </Text>{' '}
-                    Aapka current financial health score calculate ho gaya hai:
-                  </Text>
-
-                  {/* Metric snapshot tiles */}
-                  <View style={styles.metricGrid}>
-                    <View style={styles.metricCard}>
-                      <Text style={styles.metricLabel}>Monthly Income</Text>
-                      <Text style={styles.metricValue}>{formatRupee(income)}</Text>
-                    </View>
-                    <View style={styles.metricCard}>
-                      <Text style={styles.metricLabel}>Existing EMI</Text>
-                      <Text style={styles.metricValue}>{formatRupee(existingEmi)}</Text>
-                    </View>
-                    <View style={styles.metricCard}>
-                      <Text style={styles.metricLabel}>Debt-to-Income (FOIR)</Text>
-                      <Text
-                        style={[
-                          styles.metricValue,
-                          { color: emiPct > 40 ? '#B45309' : '#0F5C4D' },
-                        ]}
+                      <TouchableOpacity
+                        onPress={() => speakText(item.text)}
+                        style={styles.replaySpeakerBtn}
+                        activeOpacity={0.7}
                       >
-                        {emiPct}%
-                      </Text>
+                        <Feather name="volume-2" size={13} color="#0F5C4D" />
+                        <Text style={styles.replaySpeakerText}>Replay Voice</Text>
+                      </TouchableOpacity>
                     </View>
-                    <View style={styles.metricCard}>
-                      <Text style={styles.metricLabel}>Monthly Surplus</Text>
-                      <Text style={[styles.metricValue, { color: '#0F5C4D' }]}>
-                        {formatRupee(monthlySurplus)}
-                      </Text>
-                    </View>
-                  </View>
 
-                  <View style={styles.diagnosisBox}>
-                    <Feather name="alert-circle" size={16} color="#B45309" />
-                    <Text style={styles.diagnosisText}>
-                      <Text style={{ fontWeight: '700' }}>Rejection Risk Diagnosis:</Text> Direct
-                      unsecured personal loan apply karne par naye proposed EMI se FOIR 45% cross ho
-                      sakta hai. Lekin subsidized government schemes se approval chances 90%+ ho
-                      jate hain.
-                    </Text>
-                  </View>
-                </View>
+                    <Text style={styles.aiBubbleText}>{item.text}</Text>
 
-                {/* Continue button to Step 3 */}
+                    {/* In-chat interactive action cards */}
+                    {item.action === 'doc_prompt' && (
+                      <View style={styles.inlineActionBox}>
+                        <TouchableOpacity
+                          style={styles.inlineActionBtn}
+                          onPress={() => {
+                            onClose();
+                            router.push('/(tabs)/docs' as any);
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Feather name="upload" size={14} color="#0F5C4D" />
+                          <Text style={styles.inlineActionBtnText}>Upload Salary/Bank PDF</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.inlineActionBtn, { borderColor: '#F59E0B', backgroundColor: '#FFFBEB' }]}
+                          onPress={() => {
+                            loadDemo();
+                            handleSendMessage('Mera demo data connect karke analysis batao');
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Feather name="zap" size={14} color="#B45309" />
+                          <Text style={[styles.inlineActionBtnText, { color: '#B45309' }]}>
+                            1-Tap Demo Profile Load
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+
+                    {item.action === 'schemes_info' && (
+                      <View style={styles.inlineActionBox}>
+                        <TouchableOpacity
+                          style={styles.inlineActionBtn}
+                          onPress={() => {
+                            onClose();
+                            router.push('/schemes' as any);
+                          }}
+                          activeOpacity={0.8}
+                        >
+                          <Feather name="external-link" size={14} color="#0F5C4D" />
+                          <Text style={styles.inlineActionBtnText}>Open All Government Schemes</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                ) : (
+                  <View style={styles.userBubble}>
+                    <Feather name="mic" size={13} color="#FFFFFF" style={{ marginTop: 2 }} />
+                    <Text style={styles.userBubbleText}>{item.text}</Text>
+                  </View>
+                )}
+              </View>
+            ))}
+
+            {/* Quick Voice Prompt Suggestions */}
+            <View style={styles.quickPromptSection}>
+              <Text style={styles.quickPromptHeader}>Quick Voice Prompts (1-Tap):</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.quickPillsRow}>
                 <TouchableOpacity
-                  style={styles.primaryNextBtn}
-                  onPress={handleShowSchemes}
-                  activeOpacity={0.85}
+                  style={styles.quickPill}
+                  onPress={() => handleSendMessage('Yrr mujhe loan lena hai but reject ho jata hai, kya karu?')}
+                  activeOpacity={0.75}
                 >
-                  <Text style={styles.primaryNextBtnText}>
-                    See Recommended Schemes & Approval Hacks →
-                  </Text>
+                  <Text style={styles.quickPillText}>"Reject ho jata hai kya karu?"</Text>
                 </TouchableOpacity>
-              </View>
-            )}
 
-            {/* STAGE 3: SCHEMES & STRATEGY */}
-            {stage === 'step3_schemes' && (
-              <View style={styles.stepBox}>
-                <View style={styles.aiBubble}>
-                  <View style={styles.aiBubbleHeader}>
-                    <Text style={styles.aiBubbleName}>Sahyogi Voice AI — Bank Approval Roadmap</Text>
-                    <TouchableOpacity
-                      onPress={() =>
-                        speakText(
-                          'Aapke profile ke hisaab se do powerful government schemes hain: PM Mudra Yojana jisme bina collateral ke loan milta hai, aur loan tenure badhane se EMI 30% drop ho jayegi.'
-                        )
-                      }
-                      style={styles.replaySpeakerBtn}
-                    >
-                      <Feather name="volume-2" size={14} color="#0F5C4D" />
-                      <Text style={styles.replaySpeakerText}>Listen</Text>
-                    </TouchableOpacity>
-                  </View>
+                <TouchableOpacity
+                  style={styles.quickPill}
+                  onPress={() => handleSendMessage('Mera EMI burden aur FOIR ratio kitna safe hai?')}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.quickPillText}>"Mera EMI burden safe hai?"</Text>
+                </TouchableOpacity>
 
-                  <Text style={styles.aiBubbleText}>
-                    In schemes aur loan structuring se bank aapka loan reject nahi karega:
-                  </Text>
-                </View>
+                <TouchableOpacity
+                  style={styles.quickPill}
+                  onPress={() => handleSendMessage('Kaunsi government scheme se bina collateral loan mil sakta hai?')}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.quickPillText}>"PM Mudra loan kaise milega?"</Text>
+                </TouchableOpacity>
 
-                {/* Scheme Card 1: PM Mudra */}
-                <View style={styles.schemeCard}>
-                  <View style={styles.schemeCardTop}>
-                    <View style={styles.schemeBadge}>
-                      <Text style={styles.schemeBadgeText}>Central Govt Scheme</Text>
-                    </View>
-                    <Text style={styles.schemeApprovalRate}>High Approval Rate</Text>
-                  </View>
-                  <Text style={styles.schemeTitle}>1. PM Mudra Yojana (PMMY)</Text>
-                  <Text style={styles.schemeDesc}>
-                    Bina kisi collateral (security) ke ₹10 Lakhs tak loan milta hai. Kishore
-                    (₹50k-₹5L) category me processing fees 0% hoti hai.
-                  </Text>
-                  <View style={styles.schemeTagRow}>
-                    <View style={styles.schemeTag}>
-                      <Text style={styles.schemeTagText}>Zero Collateral</Text>
-                    </View>
-                    <View style={styles.schemeTag}>
-                      <Text style={styles.schemeTagText}>Subsidized Rate</Text>
-                    </View>
-                  </View>
-                </View>
-
-                {/* Scheme Card 2: Jan Samarth */}
-                <View style={styles.schemeCard}>
-                  <View style={styles.schemeCardTop}>
-                    <View style={[styles.schemeBadge, { backgroundColor: '#EFF6FF' }]}>
-                      <Text style={[styles.schemeBadgeText, { color: '#1D4ED8' }]}>
-                        Direct Subsidy
-                      </Text>
-                    </View>
-                    <Text style={styles.schemeApprovalRate}>JanSamarth Portal</Text>
-                  </View>
-                  <Text style={styles.schemeTitle}>2. Jan Samarth Credit Portal</Text>
-                  <Text style={styles.schemeDesc}>
-                    Ek hi application me 13 government credit schemes se digital approval milta hai.
-                    Bank verification direct Aadhaar & PAN se hota hai.
-                  </Text>
-                </View>
-
-                {/* Underwriter Hack: Tenure Extension */}
-                <View style={styles.hackCard}>
-                  <View style={styles.hackCardHeader}>
-                    <Feather name="check-circle" size={17} color="#0F5C4D" />
-                    <Text style={styles.hackCardTitle}>Underwriter Approval Hack</Text>
-                  </View>
-                  <Text style={styles.hackCardDesc}>
-                    • <Text style={{ fontWeight: '700' }}>Tenure badhayein:</Text> 3 saal ki jagah
-                    5 saal tenure lene par proposed EMI ~35% kam ho jayegi, jisse FOIR bank ke safe
-                    limit (&lt;40%) me aa jayega.
-                  </Text>
-                  <Text style={[styles.hackCardDesc, { marginTop: 6 }]}>
-                    • <Text style={{ fontWeight: '700' }}>Co-Applicant add karein:</Text> Family
-                    member ki income jodkar FOIR aur surplus strong ho jata hai.
-                  </Text>
-                </View>
-
-                {/* Final Navigation Buttons */}
-                <View style={styles.footerNavCol}>
-                  <TouchableOpacity
-                    style={styles.actionOutlineBtn}
-                    onPress={() => {
-                      onClose();
-                      router.push('/simulator' as any);
-                    }}
-                    activeOpacity={0.8}
-                  >
-                    <Feather name="sliders" size={15} color="#0F5C4D" />
-                    <Text style={styles.actionOutlineBtnText}>Test in What-If Simulator</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.actionTextBtn}
-                    onPress={() => {
-                      setStage('prompt');
-                      setUserQuery('');
-                      stopVoice();
-                    }}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.actionTextBtnText}>← Ask another question</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
+                <TouchableOpacity
+                  style={styles.quickPill}
+                  onPress={() => handleSendMessage('CIBIL score 650 se 750 kaise karein?')}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.quickPillText}>"CIBIL score 750 kaise karein?"</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
           </ScrollView>
-        </View>
+
+          {/* Gemini-Style Voice & Text Input Bar */}
+          <View style={styles.inputContainer}>
+            <View style={styles.inputBar}>
+              <TextInput
+                style={styles.textInput}
+                placeholder="Ask anything or use keyboard mic 🎙️..."
+                placeholderTextColor="#94A3B8"
+                value={inputText}
+                onChangeText={setInputText}
+                onSubmitEditing={() => handleSendMessage()}
+                returnKeyType="send"
+              />
+
+              {/* Send / Speak Button */}
+              <TouchableOpacity
+                style={[
+                  styles.sendBtn,
+                  { backgroundColor: inputText.trim() ? '#0F5C4D' : '#E2E8F0' },
+                ]}
+                onPress={() => handleSendMessage()}
+                activeOpacity={0.8}
+                disabled={!inputText.trim()}
+              >
+                <Feather
+                  name="arrow-up"
+                  size={18}
+                  color={inputText.trim() ? '#FFFFFF' : '#94A3B8'}
+                />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
   );
@@ -711,8 +597,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    maxHeight: '90%',
-    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    maxHeight: '92%',
+    paddingBottom: Platform.OS === 'ios' ? 34 : 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.15,
@@ -785,7 +671,7 @@ const styles = StyleSheet.create({
   },
   visualizerContainer: {
     backgroundColor: '#F8FAFC',
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingHorizontal: 20,
     alignItems: 'center',
     borderBottomWidth: 1,
@@ -795,7 +681,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 36,
+    height: 34,
     gap: 6,
   },
   soundBar: {
@@ -809,153 +695,73 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   scrollContent: {
-    maxHeight: 520,
+    maxHeight: 460,
   },
   scrollInner: {
-    paddingHorizontal: 20,
+    paddingHorizontal: 18,
     paddingTop: 16,
-    paddingBottom: 20,
-  },
-  promptStageBox: {
-    alignItems: 'center',
-    paddingTop: 6,
-  },
-  bigMicHero: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  bigMicGlow: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: '#0F5C4D',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#0F5C4D',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 8,
-    marginBottom: 10,
-  },
-  bigMicLabel: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  bigMicSub: {
-    fontSize: 12,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  promptListContainer: {
-    width: '100%',
-    gap: 10,
-  },
-  promptListHeading: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#64748B',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-    marginBottom: 2,
-  },
-  promptChip: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: '#F8FAFC',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 14,
-    padding: 12,
+    paddingBottom: 16,
     gap: 12,
   },
-  promptChipIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 2,
+  msgWrapper: {
+    width: '100%',
   },
-  promptChipTextWrap: {
-    flex: 1,
+  userMsgWrapper: {
+    alignItems: 'flex-end',
   },
-  promptChipText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0F172A',
-    lineHeight: 18,
-  },
-  promptChipMeta: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 2,
+  aiMsgWrapper: {
+    alignItems: 'flex-start',
   },
   userBubble: {
-    alignSelf: 'flex-end',
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#0F5C4D',
-    borderRadius: 16,
+    borderRadius: 18,
     borderBottomRightRadius: 4,
     paddingHorizontal: 14,
     paddingVertical: 10,
     maxWidth: '85%',
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 8,
-    marginBottom: 14,
-  },
-  userBubbleIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   userBubbleText: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 13.5,
     color: '#FFFFFF',
-    lineHeight: 18,
-  },
-  stepBox: {
-    gap: 14,
+    lineHeight: 19,
+    fontWeight: '500',
   },
   aiBubble: {
     backgroundColor: '#F8FAFC',
     borderRadius: 18,
+    borderBottomLeftRadius: 4,
     borderWidth: 1,
     borderColor: '#E2E8F0',
-    padding: 16,
+    padding: 14,
+    maxWidth: '92%',
   },
   aiBubbleHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   aiBubbleName: {
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: '700',
     color: '#0F5C4D',
     textTransform: 'uppercase',
-    letterSpacing: 0.4,
+    letterSpacing: 0.3,
   },
   replaySpeakerBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
     backgroundColor: '#E6F4EA',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 12,
+    paddingHorizontal: 7,
+    paddingVertical: 2.5,
+    borderRadius: 10,
   },
   replaySpeakerText: {
-    fontSize: 11,
+    fontSize: 10.5,
     fontWeight: '700',
     color: '#0F5C4D',
   },
@@ -964,217 +770,85 @@ const styles = StyleSheet.create({
     color: '#1E293B',
     lineHeight: 20,
   },
-  actionCardsGroup: {
-    gap: 10,
-  },
-  actionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: 13,
-    gap: 12,
-  },
-  actionCardDemo: {
-    borderColor: '#FCD34D',
-    backgroundColor: '#FFFBEB',
-  },
-  actionCardIconBox: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionCardBody: {
-    flex: 1,
-  },
-  actionCardTitle: {
-    fontSize: 13.5,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  actionCardDesc: {
-    fontSize: 11.5,
-    color: '#64748B',
-    marginTop: 2,
-  },
-  instantBadge: {
-    backgroundColor: '#B45309',
-    paddingHorizontal: 6,
-    paddingVertical: 1.5,
-    borderRadius: 8,
-  },
-  instantBadgeText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: '#FFFFFF',
-  },
-  metricGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  inlineActionBox: {
+    marginTop: 10,
     gap: 8,
-    marginTop: 12,
   },
-  metricCard: {
-    flex: 1,
-    minWidth: '45%',
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    borderRadius: 10,
-    padding: 10,
-  },
-  metricLabel: {
-    fontSize: 10.5,
-    color: '#64748B',
-    fontWeight: '600',
-  },
-  metricValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
-    marginTop: 2,
-  },
-  diagnosisBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    backgroundColor: '#FEF3C7',
-    borderRadius: 10,
-    padding: 10,
-    marginTop: 12,
-  },
-  diagnosisText: {
-    fontSize: 12,
-    color: '#92400E',
-    lineHeight: 17,
-    flex: 1,
-  },
-  primaryNextBtn: {
-    backgroundColor: '#0F5C4D',
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    shadowColor: '#0F5C4D',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.25,
-    shadowRadius: 6,
-    elevation: 3,
-  },
-  primaryNextBtnText: {
-    fontSize: 13.5,
-    fontWeight: '700',
-    color: '#FFFFFF',
-  },
-  schemeCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-    padding: 14,
-    gap: 6,
-  },
-  schemeCardTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  schemeBadge: {
-    backgroundColor: '#E6F4EA',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 6,
-  },
-  schemeBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#0F5C4D',
-  },
-  schemeApprovalRate: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#10B981',
-  },
-  schemeTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0F172A',
-  },
-  schemeDesc: {
-    fontSize: 12,
-    color: '#475569',
-    lineHeight: 17,
-  },
-  schemeTagRow: {
-    flexDirection: 'row',
-    gap: 6,
-    marginTop: 4,
-  },
-  schemeTag: {
-    backgroundColor: '#F1F5F9',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6,
-  },
-  schemeTagText: {
-    fontSize: 10,
-    color: '#475569',
-    fontWeight: '600',
-  },
-  hackCard: {
-    backgroundColor: '#F0FDF4',
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-    borderRadius: 14,
-    padding: 14,
-  },
-  hackCardHeader: {
+  inlineActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 6,
-  },
-  hackCardTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#166534',
-  },
-  hackCardDesc: {
-    fontSize: 12,
-    color: '#15803D',
-    lineHeight: 18,
-  },
-  footerNavCol: {
-    gap: 10,
-    marginTop: 4,
-  },
-  actionOutlineBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
     backgroundColor: '#FFFFFF',
-    borderWidth: 1.5,
+    borderWidth: 1,
     borderColor: '#0F5C4D',
-    borderRadius: 12,
-    paddingVertical: 12,
-  },
-  actionOutlineBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: '#0F5C4D',
-  },
-  actionTextBtn: {
-    alignItems: 'center',
+    borderRadius: 10,
+    paddingHorizontal: 12,
     paddingVertical: 8,
   },
-  actionTextBtnText: {
-    fontSize: 12.5,
-    fontWeight: '600',
+  inlineActionBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0F5C4D',
+  },
+  quickPromptSection: {
+    marginTop: 8,
+  },
+  quickPromptHeader: {
+    fontSize: 11,
+    fontWeight: '700',
     color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
+    marginBottom: 8,
+  },
+  quickPillsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingBottom: 4,
+  },
+  quickPill: {
+    backgroundColor: '#F1F5F9',
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  quickPillText: {
+    fontSize: 12,
+    color: '#334155',
+    fontWeight: '600',
+  },
+  inputContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#F1F5F9',
+    backgroundColor: '#FFFFFF',
+  },
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingHorizontal: 14,
+    paddingVertical: Platform.OS === 'ios' ? 8 : 4,
+  },
+  textInput: {
+    flex: 1,
+    fontSize: 13.5,
+    color: '#0F172A',
+    paddingVertical: 6,
+  },
+  sendBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 6,
   },
 });
-

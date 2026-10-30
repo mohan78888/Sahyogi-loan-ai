@@ -3,9 +3,54 @@ AI Financial Advisor Service for Sahyogi Loan AI.
 Generates structured 30/60/90-day action plans, report-aware chat responses,
 and provides robust fallback guardrails against hallucinations.
 """
+import os
+import httpx
 from typing import Dict, Any, Optional, List
 from schemas.report import AIAdvisorReportResponse, RecommendationItem
 from schemas.chat import ChatMessageResponse
+from core.config import settings
+
+def call_gemini_api(query: str, context: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
+    if not api_key:
+        return None
+    try:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        ctx_summary = ""
+        if context:
+            ctx_summary = (
+                f"Borrower Financial Profile: Monthly Income: ₹{context.get('income') or context.get('monthly_income', 'N/A')}, "
+                f"Existing EMI: ₹{context.get('existingEmi') or context.get('existing_emis', 'N/A')}, "
+                f"Calculated FOIR: {context.get('foir_pct') or context.get('emi_to_income_pct', 'N/A')}%, "
+                f"Monthly Surplus: ₹{context.get('monthly_surplus', 'N/A')}."
+            )
+        system_prompt = (
+            "You are Sahyogi Loan AI, an expert Indian banking underwriting diagnostic and financial advisor. "
+            "Help the user understand why loans get rejected, how to improve FOIR/DTI ratio, and recommend Indian government schemes "
+            "(e.g., PM Mudra PMMY, Jan Samarth, PMAY) or tenure extension hacks. "
+            "Reply in natural, encouraging Hinglish (Hindi + English). "
+            "Keep the reply concise (under 75 words) so it can be easily read aloud by Text-to-Speech."
+        )
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": f"{system_prompt}\n\n{ctx_summary}\n\nUser Question: {query}"}
+                    ]
+                }
+            ]
+        }
+        res = httpx.post(url, json=payload, timeout=5.0)
+        if res.status_code == 200:
+            data = res.json()
+            candidates = data.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    return parts[0].get("text", "").strip()
+    except Exception as e:
+        print(f"Gemini API request skipped/failed: {e}")
+    return None
 
 class AIAdvisorService:
 
@@ -97,6 +142,19 @@ class AIAdvisorService:
     def handle_chat(query: str, context: Optional[Dict[str, Any]] = None) -> ChatMessageResponse:
         q = query.lower().strip()
         ctx = context or {}
+
+        # 1. Try Gemini 1.5 Flash first if configured
+        gemini_reply = call_gemini_api(query, ctx)
+        if gemini_reply:
+            return ChatMessageResponse(
+                reply=gemini_reply,
+                suggested_followups=[
+                    "Kaunsi government scheme se loan mil sakta hai?",
+                    "Mera safe EMI burden kitna hona chahiye?",
+                    "Tenure badhane se EMI kitni kam hogi?"
+                ],
+                disclaimer="Informational guidance powered by Gemini & Sahyogi Underwriting Rules."
+            )
 
         # Safely extract or compute foir and surplus from any context provided
         income = float(ctx.get("monthly_income") or ctx.get("income") or ctx.get("monthly_net_income") or 60000)
