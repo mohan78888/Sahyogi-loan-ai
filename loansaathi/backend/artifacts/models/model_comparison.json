@@ -1,0 +1,163 @@
+{
+  "dataset": "loan_dataset_20000.csv",
+  "train_samples": 16000,
+  "test_samples": 4000,
+  "target": "loan_paid_back",
+  "models": {
+    "logistic_regression_clean": {
+      "model_name": "Logistic Regression (Pre-Underwriting Clean)",
+      "cv_metrics_mean": {
+        "accuracy": 0.8087,
+        "precision": 0.9258,
+        "recall": 0.8271,
+        "f1": 0.8737,
+        "roc_auc": 0.885
+      },
+      "test_metrics": {
+        "accuracy": 0.815,
+        "precision": 0.9286,
+        "recall": 0.8328,
+        "f1": 0.8781,
+        "roc_auc": 0.8853
+      },
+      "confusion_matrix": {
+        "true_negatives_default_detected": 595,
+        "false_positives_predicted_repaid_but_defaulted": 205,
+        "false_negatives_predicted_default_but_repaid": 535,
+        "true_positives_repaid_detected": 2665
+      },
+      "classification_report": {
+        "0": {
+          "precision": 0.5265486725663717,
+          "recall": 0.74375,
+          "f1-score": 0.616580310880829,
+          "support": 800.0
+        },
+        "1": {
+          "precision": 0.9285714285714286,
+          "recall": 0.8328125,
+          "f1-score": 0.8780889621087314,
+          "support": 3200.0
+        },
+        "accuracy": 0.815,
+        "macro avg": {
+          "precision": 0.7275600505689002,
+          "recall": 0.78828125,
+          "f1-score": 0.7473346364947802,
+          "support": 4000.0
+        },
+        "weighted avg": {
+          "precision": 0.8481668773704173,
+          "recall": 0.815,
+          "f1-score": 0.825787231863151,
+          "support": 4000.0
+        }
+      }
+    },
+    "random_forest_clean": {
+      "model_name": "Random Forest Classifier (Pre-Underwriting Clean)",
+      "cv_metrics_mean": {
+        "accuracy": 0.8662,
+        "precision": 0.9116,
+        "recall": 0.9223,
+        "f1": 0.9169,
+        "roc_auc": 0.8869
+      },
+      "test_metrics": {
+        "accuracy": 0.8708,
+        "precision": 0.9142,
+        "recall": 0.9253,
+        "f1": 0.9197,
+        "roc_auc": 0.8852
+      },
+      "confusion_matrix": {
+        "true_negatives_default_detected": 522,
+        "false_positives_predicted_repaid_but_defaulted": 278,
+        "false_negatives_predicted_default_but_repaid": 239,
+        "true_positives_repaid_detected": 2961
+      },
+      "classification_report": {
+        "0": {
+          "precision": 0.6859395532194481,
+          "recall": 0.6525,
+          "f1-score": 0.6688020499679692,
+          "support": 800.0
+        },
+        "1": {
+          "precision": 0.9141710404445816,
+          "recall": 0.9253125,
+          "f1-score": 0.9197080291970803,
+          "support": 3200.0
+        },
+        "accuracy": 0.87075,
+        "macro avg": {
+          "precision": 0.8000552968320149,
+          "recall": 0.7889062499999999,
+          "f1-score": 0.7942550395825247,
+          "support": 4000.0
+        },
+        "weighted avg": {
+          "precision": 0.868524742999555,
+          "recall": 0.87075,
+          "f1-score": 0.8695268333512581,
+          "support": 4000.0
+        }
+      }
+    },
+    "random_forest_with_leakage": {
+      "model_name": "Random Forest (With Underwriting Leakage Features)",
+      "cv_metrics_mean": {
+        "accuracy": 0.8625,
+        "precision": 0.9113,
+        "recall": 0.9175,
+        "f1": 0.9143,
+        "roc_auc": 0.8844
+      },
+      "test_metrics": {
+        "accuracy": 0.869,
+        "precision": 0.9127,
+        "recall": 0.9247,
+        "f1": 0.9187,
+        "roc_auc": 0.885
+      },
+      "confusion_matrix": {
+        "true_negatives_default_detected": 517,
+        "false_positives_predicted_repaid_but_defaulted": 283,
+        "false_negatives_predicted_default_but_repaid": 241,
+        "true_positives_repaid_detected": 2959
+      },
+      "classification_report": {
+        "0": {
+          "precision": 0.6820580474934037,
+          "recall": 0.64625,
+          "f1-score": 0.6636713735558408,
+          "support": 800.0
+        },
+        "1": {
+          "precision": 0.9127082048118446,
+          "recall": 0.9246875,
+          "f1-score": 0.9186588016144055,
+          "support": 3200.0
+        },
+        "accuracy": 0.869,
+        "macro avg": {
+          "precision": 0.7973831261526241,
+          "recall": 0.7854687499999999,
+          "f1-score": 0.7911650875851232,
+          "support": 4000.0
+        },
+        "weighted avg": {
+          "precision": 0.8665781733481563,
+          "recall": 0.869,
+          "f1-score": 0.8676613160026925,
+          "support": 4000.0
+        }
+      }
+    }
+  },
+  "target_leakage_analysis": {
+    "clean_rf_roc_auc": 0.8852,
+    "leakage_rf_roc_auc": 0.885,
+    "finding": "Adding post-hoc underwriting features ('grade_subgrade', 'interest_rate') introduces target leakage, which superficially shifts AUC. To ensure ethical pre-application decision support, the clean pre-underwriting pipeline is chosen as production baseline."
+  }
+}

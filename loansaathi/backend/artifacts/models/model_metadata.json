@@ -1,0 +1,61 @@
+{
+  "best_model_name": "Random Forest Classifier (Clean Pre-underwriting)",
+  "model_file": "best_repayment_model.joblib",
+  "algorithm": "RandomForestClassifier",
+  "n_estimators": 150,
+  "max_depth": 12,
+  "class_weight": "balanced",
+  "metrics": {
+    "model_name": "Random Forest Classifier (Pre-Underwriting Clean)",
+    "cv_metrics_mean": {
+      "accuracy": 0.8662,
+      "precision": 0.9116,
+      "recall": 0.9223,
+      "f1": 0.9169,
+      "roc_auc": 0.8869
+    },
+    "test_metrics": {
+      "accuracy": 0.8708,
+      "precision": 0.9142,
+      "recall": 0.9253,
+      "f1": 0.9197,
+      "roc_auc": 0.8852
+    },
+    "confusion_matrix": {
+      "true_negatives_default_detected": 522,
+      "false_positives_predicted_repaid_but_defaulted": 278,
+      "false_negatives_predicted_default_but_repaid": 239,
+      "true_positives_repaid_detected": 2961
+    },
+    "classification_report": {
+      "0": {
+        "precision": 0.6859395532194481,
+        "recall": 0.6525,
+        "f1-score": 0.6688020499679692,
+        "support": 800.0
+      },
+      "1": {
+        "precision": 0.9141710404445816,
+        "recall": 0.9253125,
+        "f1-score": 0.9197080291970803,
+        "support": 3200.0
+      },
+      "accuracy": 0.87075,
+      "macro avg": {
+        "precision": 0.8000552968320149,
+        "recall": 0.7889062499999999,
+        "f1-score": 0.7942550395825247,
+        "support": 4000.0
+      },
+      "weighted avg": {
+        "precision": 0.868524742999555,
+        "recall": 0.87075,
+        "f1-score": 0.8695268333512581,
+        "support": 4000.0
+      }
+    }
+  },
+  "target": "loan_paid_back",
+  "ethical_compliance": "Demographic variables (age, gender, marital_status, education_level) strictly omitted.",
+  "limitations": "Predicts statistical probability of historical repayment based on credit and cashflow profiles. Does not constitute loan approval, bank underwriting guarantee, or official bureau assessment."
+}

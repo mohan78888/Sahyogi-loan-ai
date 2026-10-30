@@ -1,0 +1,244 @@
+{
+  "dataset_name": "loan_dataset_20000.csv",
+  "total_rows": 20000,
+  "total_columns": 22,
+  "has_missing_values": false,
+  "missing_values_by_column": {
+    "age": 0,
+    "gender": 0,
+    "marital_status": 0,
+    "education_level": 0,
+    "annual_income": 0,
+    "monthly_income": 0,
+    "employment_status": 0,
+    "debt_to_income_ratio": 0,
+    "credit_score": 0,
+    "loan_amount": 0,
+    "loan_purpose": 0,
+    "interest_rate": 0,
+    "loan_term": 0,
+    "installment": 0,
+    "grade_subgrade": 0,
+    "num_of_open_accounts": 0,
+    "total_credit_limit": 0,
+    "current_balance": 0,
+    "delinquency_history": 0,
+    "public_records": 0,
+    "num_of_delinquencies": 0,
+    "loan_paid_back": 0
+  },
+  "duplicate_rows": 0,
+  "target_column": "loan_paid_back",
+  "target_distribution": {
+    "repaid_count_1": 15998,
+    "default_count_0": 4002,
+    "repayment_rate_pct": 79.99,
+    "default_rate_pct": 20.01,
+    "class_balance": "80.0% Repaid vs 20.0% Default"
+  },
+  "income_consistency_check": {
+    "expected_ratio": 12.0,
+    "observed_mean_ratio": 12.0,
+    "observed_std_ratio": 0.0,
+    "records_matching_ratio_12": 20000,
+    "is_consistent": true
+  },
+  "sensitive_demographic_features": [
+    "age",
+    "gender",
+    "marital_status",
+    "education_level"
+  ],
+  "potential_leakage_features": [
+    "grade_subgrade",
+    "interest_rate"
+  ],
+  "column_data_types": {
+    "age": "int64",
+    "gender": "str",
+    "marital_status": "str",
+    "education_level": "str",
+    "annual_income": "float64",
+    "monthly_income": "float64",
+    "employment_status": "str",
+    "debt_to_income_ratio": "float64",
+    "credit_score": "int64",
+    "loan_amount": "float64",
+    "loan_purpose": "str",
+    "interest_rate": "float64",
+    "loan_term": "int64",
+    "installment": "float64",
+    "grade_subgrade": "str",
+    "num_of_open_accounts": "int64",
+    "total_credit_limit": "float64",
+    "current_balance": "float64",
+    "delinquency_history": "int64",
+    "public_records": "int64",
+    "num_of_delinquencies": "int64",
+    "loan_paid_back": "int64"
+  },
+  "summary_statistics": {
+    "age": {
+      "min": 21.0,
+      "max": 75.0,
+      "mean": 48.03,
+      "median": 48.0,
+      "std": 15.83,
+      "q25": 35.0,
+      "q75": 62.0
+    },
+    "annual_income": {
+      "min": 6000.0,
+      "max": 400000.0,
+      "mean": 43549.64,
+      "median": 36585.26,
+      "std": 28668.58,
+      "q25": 24260.75,
+      "q75": 54677.92
+    },
+    "monthly_income": {
+      "min": 500.0,
+      "max": 33333.33,
+      "mean": 3629.14,
+      "median": 3048.77,
+      "std": 2389.05,
+      "q25": 2021.73,
+      "q75": 4556.49
+    },
+    "debt_to_income_ratio": {
+      "min": 0.01,
+      "max": 0.667,
+      "mean": 0.18,
+      "median": 0.16,
+      "std": 0.11,
+      "q25": 0.1,
+      "q75": 0.24
+    },
+    "credit_score": {
+      "min": 373.0,
+      "max": 850.0,
+      "mean": 679.26,
+      "median": 680.0,
+      "std": 69.64,
+      "q25": 632.0,
+      "q75": 727.0
+    },
+    "loan_amount": {
+      "min": 500.0,
+      "max": 49039.69,
+      "mean": 15129.3,
+      "median": 14946.17,
+      "std": 8605.41,
+      "q25": 8852.69,
+      "q75": 20998.87
+    },
+    "interest_rate": {
+      "min": 3.14,
+      "max": 22.51,
+      "mean": 12.4,
+      "median": 12.4,
+      "std": 2.44,
+      "q25": 10.74,
+      "q75": 14.0
+    },
+    "loan_term": {
+      "min": 36.0,
+      "max": 60.0,
+      "mean": 43.22,
+      "median": 36.0,
+      "std": 11.01,
+      "q25": 36.0,
+      "q75": 60.0
+    },
+    "installment": {
+      "min": 9.43,
+      "max": 1685.4,
+      "mean": 455.63,
+      "median": 435.6,
+      "std": 274.62,
+      "q25": 253.91,
+      "q75": 633.6
+    },
+    "num_of_open_accounts": {
+      "min": 0.0,
+      "max": 15.0,
+      "mean": 5.01,
+      "median": 5.0,
+      "std": 2.24,
+      "q25": 3.0,
+      "q75": 6.0
+    },
+    "total_credit_limit": {
+      "min": 6157.8,
+      "max": 454394.19,
+      "mean": 48649.82,
+      "median": 40241.61,
+      "std": 32423.38,
+      "q25": 27180.49,
+      "q75": 60361.26
+    },
+    "current_balance": {
+      "min": 496.35,
+      "max": 352177.9,
+      "mean": 24333.39,
+      "median": 18334.56,
+      "std": 22313.85,
+      "q25": 9592.57,
+      "q75": 31743.33
+    },
+    "delinquency_history": {
+      "min": 0.0,
+      "max": 11.0,
+      "mean": 1.99,
+      "median": 2.0,
+      "std": 1.47,
+      "q25": 1.0,
+      "q75": 3.0
+    },
+    "public_records": {
+      "min": 0.0,
+      "max": 2.0,
+      "mean": 0.06,
+      "median": 0.0,
+      "std": 0.29,
+      "q25": 0.0,
+      "q75": 0.0
+    },
+    "num_of_delinquencies": {
+      "min": 0.0,
+      "max": 11.0,
+      "mean": 2.49,
+      "median": 2.0,
+      "std": 1.63,
+      "q25": 1.0,
+      "q75": 3.0
+    },
+    "loan_paid_back": {
+      "min": 0.0,
+      "max": 1.0,
+      "mean": 0.8,
+      "median": 1.0,
+      "std": 0.4,
+      "q25": 1.0,
+      "q75": 1.0
+    }
+  },
+  "correlation_with_target": {
+    "loan_paid_back": 1.0,
+    "credit_score": 0.1998,
+    "age": 0.008,
+    "public_records": 0.0032,
+    "monthly_income": 0.0031,
+    "annual_income": 0.0031,
+    "num_of_open_accounts": 0.003,
+    "loan_amount": -0.0025,
+    "loan_term": -0.0026,
+    "total_credit_limit": -0.003,
+    "current_balance": -0.0047,
+    "installment": -0.0101,
+    "num_of_delinquencies": -0.0709,
+    "delinquency_history": -0.0849,
+    "interest_rate": -0.1109,
+    "debt_to_income_ratio": -0.2238
+  }
+}
