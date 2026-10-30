@@ -19,6 +19,8 @@ import { ProgressBar } from '../../src/components/ProgressBar';
 import { ManualEntrySheet } from '../../src/components/ManualEntrySheet';
 import { DemoMenuModal } from '../../src/components/DemoMenuModal';
 import { IncomeSplitChart, EmiBurdenMeter } from '../../src/components/charts';
+import { VoiceFloatingButton } from '../../src/components/VoiceFloatingButton';
+import { VoiceAssistantModal } from '../../src/components/VoiceAssistantModal';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -33,6 +35,7 @@ export default function HomeScreen() {
 
   const [manualSheetVisible, setManualSheetVisible] = useState(false);
   const [demoModalVisible, setDemoModalVisible] = useState(false);
+  const [voiceModalVisible, setVoiceModalVisible] = useState(false);
 
   const confirmedDocsCount = documents.filter((d) => d.status === 'confirmed').length;
   const totalDocs = 5;
@@ -301,6 +304,16 @@ export default function HomeScreen() {
       <DemoMenuModal
         visible={demoModalVisible}
         onClose={() => setDemoModalVisible(false)}
+      />
+
+      {/* Floating Voice Mic Button at bottom-right */}
+      <VoiceFloatingButton onPress={() => setVoiceModalVisible(true)} />
+
+      {/* Sahyogi Voice AI Assistant Modal */}
+      <VoiceAssistantModal
+        visible={voiceModalVisible}
+        onClose={() => setVoiceModalVisible(false)}
+        onOpenManualEntry={() => setManualSheetVisible(true)}
       />
     </SafeAreaView>
   );
