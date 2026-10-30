@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import * as Speech from 'expo-speech';
 import { Theme } from '../theme/theme';
 import { useFinance } from '../context/FinanceContext';
 import { formatRupee } from '../utils/finance';
@@ -57,6 +58,11 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
 
   // Stop TTS when closing
   const stopVoice = () => {
+    try {
+      Speech.stop();
+    } catch (e) {
+      // ignore
+    }
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.cancel();
@@ -71,11 +77,44 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
     if (isMuted) return;
     setIsSpeaking(true);
 
+    const plainText = text.replace(/[*#_~]/g, '');
+
+    // 1. Native Expo-Speech (Works on Android / iOS directly, 100% free, NO API KEY needed)
+    try {
+      Speech.stop();
+      Speech.speak(plainText, {
+        language: 'hi-IN',
+        pitch: 1.0,
+        rate: 0.95,
+        onStart: () => setIsSpeaking(true),
+        onDone: () => setIsSpeaking(false),
+        onStopped: () => setIsSpeaking(false),
+        onError: () => {
+          // Fallback to English (India) if Hindi voice pack is not installed on user's device
+          try {
+            Speech.speak(plainText, {
+              language: 'en-IN',
+              pitch: 1.0,
+              rate: 0.95,
+              onStart: () => setIsSpeaking(true),
+              onDone: () => setIsSpeaking(false),
+              onStopped: () => setIsSpeaking(false),
+              onError: () => setIsSpeaking(false),
+            });
+          } catch {
+            setIsSpeaking(false);
+          }
+        },
+      });
+      return;
+    } catch (err) {
+      // Native speech not available, fallback to Web Speech
+    }
+
+    // 2. Web fallback
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
       try {
         window.speechSynthesis.cancel();
-        // Clean markdown asterisks for natural reading
-        const plainText = text.replace(/[*#_~]/g, '');
         const utterance = new SpeechSynthesisUtterance(plainText);
         utterance.rate = 1.0;
         utterance.pitch = 1.0;
@@ -96,7 +135,6 @@ export const VoiceAssistantModal: React.FC<VoiceAssistantModalProps> = ({
         setIsSpeaking(false);
       }
     } else {
-      // Simulate speaking animation for 4 seconds on native
       setTimeout(() => {
         setIsSpeaking(false);
       }, 4000);
@@ -1139,3 +1177,4 @@ const styles = StyleSheet.create({
     color: '#64748B',
   },
 });
+
