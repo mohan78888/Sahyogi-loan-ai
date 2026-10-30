@@ -14,42 +14,46 @@ def call_gemini_api(query: str, context: Optional[Dict[str, Any]] = None) -> Opt
     api_key = settings.GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "")
     if not api_key:
         return None
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        ctx_summary = ""
-        if context:
-            ctx_summary = (
-                f"Borrower Financial Profile: Monthly Income: ₹{context.get('income') or context.get('monthly_income', 'N/A')}, "
-                f"Existing EMI: ₹{context.get('existingEmi') or context.get('existing_emis', 'N/A')}, "
-                f"Calculated FOIR: {context.get('foir_pct') or context.get('emi_to_income_pct', 'N/A')}%, "
-                f"Monthly Surplus: ₹{context.get('monthly_surplus', 'N/A')}."
-            )
-        system_prompt = (
-            "You are Sahyogi Loan AI, an expert Indian banking underwriting diagnostic and financial advisor. "
-            "Help the user understand why loans get rejected, how to improve FOIR/DTI ratio, and recommend Indian government schemes "
-            "(e.g., PM Mudra PMMY, Jan Samarth, PMAY) or tenure extension hacks. "
-            "Reply in natural, encouraging Hinglish (Hindi + English). "
-            "Keep the reply concise (under 75 words) so it can be easily read aloud by Text-to-Speech."
+
+    models_to_try = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-1.5-flash"]
+    ctx_summary = ""
+    if context:
+        ctx_summary = (
+            f"Borrower Financial Profile: Monthly Income: ₹{context.get('income') or context.get('monthly_income', 'N/A')}, "
+            f"Existing EMI: ₹{context.get('existingEmi') or context.get('existing_emis', 'N/A')}, "
+            f"Calculated FOIR: {context.get('foir_pct') or context.get('emi_to_income_pct', 'N/A')}%, "
+            f"Monthly Surplus: ₹{context.get('monthly_surplus', 'N/A')}."
         )
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": f"{system_prompt}\n\n{ctx_summary}\n\nUser Question: {query}"}
-                    ]
-                }
-            ]
-        }
-        res = httpx.post(url, json=payload, timeout=5.0)
-        if res.status_code == 200:
-            data = res.json()
-            candidates = data.get("candidates", [])
-            if candidates:
-                parts = candidates[0].get("content", {}).get("parts", [])
-                if parts:
-                    return parts[0].get("text", "").strip()
-    except Exception as e:
-        print(f"Gemini API request skipped/failed: {e}")
+    system_prompt = (
+        "You are Sahyogi Loan AI, an expert Indian banking credit underwriter and financial advisor. "
+        "Help the user understand why loans get rejected, how to improve FOIR/DTI ratio, and recommend Indian government schemes "
+        "(e.g., PM Mudra PMMY, Jan Samarth, PMAY) or tenure extension hacks. "
+        "Reply in natural, encouraging Hinglish (Hindi + English). "
+        "Keep the reply concise (under 75 words) so it can be easily read aloud by Text-to-Speech."
+    )
+    payload = {
+        "contents": [
+            {
+                "parts": [
+                    {"text": f"{system_prompt}\n\n{ctx_summary}\n\nUser Question: {query}"}
+                ]
+            }
+        ]
+    }
+
+    for model_name in models_to_try:
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={api_key}"
+            res = httpx.post(url, json=payload, timeout=12.0)
+            if res.status_code == 200:
+                data = res.json()
+                candidates = data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        return parts[0].get("text", "").strip()
+        except Exception as e:
+            continue
     return None
 
 class AIAdvisorService:
